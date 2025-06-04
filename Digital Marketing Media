@@ -1,0 +1,156 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+import streamlit as st
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# -------------------------
+# STEP 0: SIMULATE DATA
+# -------------------------
+np.random.seed(42)
+n_users = 1000
+channels = ['Google Ads', 'Facebook', 'LinkedIn']
+campaigns = ['Campaign A', 'Campaign B', 'Campaign C']
+messages = ['Discount Offer', 'Emotional Appeal', 'Free Trial']
+
+user_data = pd.DataFrame({
+    'user_id': range(n_users),
+    'age': np.random.randint(18, 65, size=n_users),
+    'gender': np.random.choice(['Male', 'Female', 'Other'], size=n_users),
+    'location': np.random.choice(['Urban', 'Suburban', 'Rural'], size=n_users),
+    'interest_score': np.random.rand(n_users) * 100,
+    'channel': np.random.choice(channels, size=n_users),
+    'campaign': np.random.choice(campaigns, size=n_users),
+    'message': np.random.choice(messages, size=n_users),
+    'is_video_campaign': np.random.choice([0, 1], size=n_users, p=[0.7, 0.3])
+})
+
+# Calculate marketing KPIs
+user_data['click_through_rate'] = np.clip((user_data['interest_score'] / 100) + np.random.normal(0, 0.05, n_users), 0, 1)
+user_data['converted'] = np.random.binomial(1, user_data['click_through_rate'] * 0.5)
+user_data['impressions'] = np.random.randint(100, 1000, size=n_users)
+user_data['clicks'] = (user_data['impressions'] * user_data['click_through_rate']).astype(int)
+
+spend_per_channel = {'Google Ads': 10000, 'Facebook': 8000, 'LinkedIn': 5000}
+user_data['ad_spend'] = user_data['channel'].map(lambda x: spend_per_channel[x] / (user_data['channel'] == x).sum())
+user_data['revenue'] = user_data['converted'] * np.random.uniform(50, 200, n_users)
+user_data['LTV'] = user_data['converted'] * np.random.uniform(150, 1000, n_users)
+
+# Performance Metrics
+user_data['CPC'] = user_data['ad_spend'] / np.maximum(user_data['clicks'], 1)
+user_data['CPM'] = (user_data['ad_spend'] / user_data['impressions']) * 1000
+user_data['ROAS'] = user_data['LTV'] / np.maximum(user_data['ad_spend'], 1)
+user_data['conversion_rate'] = user_data['converted'] / np.maximum(user_data['clicks'], 1)
+
+# -------------------------
+# STEP 1: CONVERSION MODEL
+# -------------------------
+features = ['age', 'interest_score', 'clicks', 'impressions', 'is_video_campaign']
+X = user_data[features]
+y = user_data['converted']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+user_data['predicted_conversion'] = model.predict(X)
+
+# -------------------------
+# STEP 2: SPEND OPTIMIZATION
+# -------------------------
+summary = user_data.groupby(['channel', 'campaign', 'message']).agg({
+    'user_id': 'count',
+    'converted': 'sum',
+    'ad_spend': 'sum',
+    'LTV': 'sum'
+}).reset_index()
+summary['ROAS'] = summary['LTV'] / np.maximum(summary['ad_spend'], 1)
+summary['optimized_spend'] = summary['ROAS'] / summary['ROAS'].sum() * 23000
+
+# -------------------------
+# STEP 3: USER SEGMENTATION
+# -------------------------
+segment_features = ['age', 'interest_score', 'clicks', 'impressions']
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(user_data[segment_features])
+kmeans = KMeans(n_clusters=4, random_state=42)
+user_data['segment'] = kmeans.fit_predict(X_scaled)
+
+# -------------------------
+# STEP 4: MESSAGING RECOMMENDATION
+# -------------------------
+message_perf = user_data.groupby(['segment', 'message']).agg({
+    'converted': 'mean',
+    'ROAS': 'mean'
+}).reset_index().sort_values(by=['segment', 'ROAS'], ascending=[True, False])
+
+# -------------------------
+# CHARTS
+# -------------------------
+
+# Spend Optimization Bar Chart
+plt.figure(figsize=(8, 6))
+summary.set_index('channel')['optimized_spend'].plot(kind='bar', color='skyblue')
+plt.title("Optimized Spend Allocation by Channel")
+plt.ylabel("Optimized Spend")
+plt.xlabel("Channel")
+plt.tight_layout()
+
+# Save the chart as an image
+plt.savefig("optimized_spend_chart.png")
+plt.close()
+
+# User Segmentation Pie Chart
+plt.figure(figsize=(8, 6))
+user_data['segment'].value_counts().plot(kind='pie', autopct='%1.1f%%', colors=sns.color_palette("Set3", 4))
+plt.title("User Segments Distribution")
+plt.tight_layout()
+
+# Save the pie chart
+plt.savefig("user_segmentation_chart.png")
+plt.close()
+
+# -------------------------
+# STREAMLIT UI
+# -------------------------
+st.set_page_config(page_title="Digital Media Marketing Agent")
+st.title("📊 Digital Media Marketing Agent")
+
+st.header("🔮 Conversion Prediction Model")
+st.text("Random Forest Classifier trained to predict likelihood of user conversion")
+st.text(classification_report(y_test, y_pred))
+
+st.header("💰 Spend Optimization")
+st.dataframe(summary[['channel', 'campaign', 'message', 'ROAS', 'optimized_spend']])
+st.bar_chart(summary.set_index('channel')['optimized_spend'])
+
+st.header("🧠 User Segmentation")
+st.bar_chart(user_data['segment'].value_counts())
+
+st.header("💬 Recommended Messaging by Segment")
+st.dataframe(message_perf)
+
+st.header("🧾 Example AI Insights")
+st.markdown("""
+- **Segment 2** responds best to **Emotional Appeal + Discount** on **LinkedIn Video** campaigns.
+- **Segment 1** prefers **Free Trials** and clicks most on **Google Ads**.
+- **User 102** has a **68% chance to convert** on **Facebook Campaign B**.
+- **Segment 3** has high interest score but low conversion → needs better targeting.
+- **Emotional Appeal** drives highest ROAS on video campaigns (avg 18.9).
+- Recommend reallocating 30% more budget to **Campaign A on LinkedIn with video**.
+- **Users aged 25–34** show 2x higher CTR on video.
+- **Rural segments** underperform on LinkedIn but excel on Facebook.
+- **Segment 0** users convert well on static campaigns but fall off with video.
+- **Discount messages** perform better in suburban areas with ROAS > 2.0.
+- **Campaign B** underperforms across all channels, recommend A/B test.
+""")
+
+# -------------------------
+# FINAL OUTPUT
+# -------------------------
+print("Charts generated and saved as 'optimized_spend_chart.png' and 'user_segmentation_chart.png'.")
+
